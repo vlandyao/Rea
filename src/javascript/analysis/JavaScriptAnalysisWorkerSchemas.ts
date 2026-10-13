@@ -267,7 +267,8 @@ const electron = z
         ...findingContext,
         specifier: z.string(),
         binding_kind: z.enum(["import", "require", "re-export"]),
-        module_kind: z.enum(["import", "require"]),
+        module_kind: z.enum(["import", "require", "compiler-dependent"]),
+        type_only: z.boolean().optional(),
         members: strings,
         namespace_access: z.boolean().optional(),
         dynamic_member_access: z.boolean().optional(),
@@ -387,10 +388,15 @@ export const javaScriptWorkerStaticAnalysisSchema = z
       sender_validations: analysis.electron.sender_validations.map(withRuntime),
       native_addon_bindings: analysis.electron.native_addon_bindings.map(
         (value) => {
-          const { namespace_access, dynamic_member_access, ...rest } =
-            withRuntime(value);
+          const {
+            namespace_access,
+            dynamic_member_access,
+            type_only,
+            ...rest
+          } = withRuntime(value);
           return {
             ...rest,
+            ...(type_only === undefined ? {} : { type_only }),
             ...(namespace_access === undefined ? {} : { namespace_access }),
             ...(dynamic_member_access === undefined
               ? {}
@@ -545,15 +551,21 @@ const moduleLink = z
     ]),
     specifier: z.string().nullable(),
     importedName: z.string().nullable(),
+    importedSelection: z.array(z.array(z.string())).optional(),
+    dynamicMemberAccess: z.boolean().optional(),
     localName: z.string().nullable(),
     exportedName: z.string().nullable(),
     callableId: z.string().nullable(),
     location: range,
   })
-  .transform(({ resolutionMode, ...rest }) => ({
-    ...rest,
-    ...(resolutionMode === undefined ? {} : { resolutionMode }),
-  }));
+  .transform(
+    ({ resolutionMode, importedSelection, dynamicMemberAccess, ...rest }) => ({
+      ...rest,
+      ...(resolutionMode === undefined ? {} : { resolutionMode }),
+      ...(importedSelection === undefined ? {} : { importedSelection }),
+      ...(dynamicMemberAccess === undefined ? {} : { dynamicMemberAccess }),
+    }),
+  );
 const definitionKind = z.enum([
   "import",
   "variable",
