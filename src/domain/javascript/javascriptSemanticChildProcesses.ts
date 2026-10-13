@@ -221,10 +221,7 @@ const childInteraction = (
       .map((candidate) => spawnId(candidate))
       .sort(compareUnicodeCodePoints),
     eventName: kind === "listener" ? eventName : null,
-    signalName:
-      kind === "signal"
-        ? (dataEffectLiteralString(node.arguments[0]) ?? "SIGTERM")
-        : null,
+    signalName: kind === "signal" ? killSignalName(node.arguments) : null,
     listenerLocation:
       kind === "listener" && t.isNode(listener) ? range(listener) : null,
     resolution:
@@ -325,11 +322,20 @@ const resolveChildCandidates = (
     : (spawnsByBinding.get(binding.bindingId) ?? []);
 };
 
+// spawn, execFile, and fork accept options in place of the optional args array.
 const spawnOptions = (candidate: SpawnCandidate): t.ObjectExpression | null => {
-  const index = candidate.method === "exec" ? 1 : 2;
-  const value = candidate.node.arguments[index];
+  const [, second, third] = candidate.node.arguments;
+  const value =
+    candidate.method === "exec" || t.isObjectExpression(second)
+      ? second
+      : third;
   return t.isObjectExpression(value) ? value : null;
 };
+
+// Only an omitted argument selects the SIGTERM default; an unresolved
+// argument leaves the signal unknown.
+const killSignalName = (args: t.CallExpression["arguments"]): string | null =>
+  args.length === 0 ? "SIGTERM" : dataEffectLiteralString(args[0]);
 
 const spawnArgvCount = (candidate: SpawnCandidate): number | null => {
   if (candidate.method === "exec") return null;

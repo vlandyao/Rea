@@ -170,3 +170,90 @@ describe("JavaScript semantic analysis: native bindings 2", () => {
     );
   });
 });
+
+describe("JavaScript semantic analysis: child-process call forms", () => {
+  it("recovers child-process options with or without the optional args array", () => {
+    const spawnFacts = (source: string) =>
+      analyzeJavaScriptSemantics(source).childProcessSpawns.map(
+        ({ method, environmentSupplied, stdioMode, resolution }) => ({
+          method,
+          environmentSupplied,
+          stdioMode,
+          resolution,
+        }),
+      );
+    const optionsSource = (args: string) => `
+      import { spawn, execFile, fork } from "node:child_process";
+      spawn("tool", ${args}{ env: { A: "1" }, stdio: "pipe" });
+      execFile("tool", ${args}{ env: { A: "1" } });
+      fork("worker.js", ${args}{
+        env: { A: "1" },
+        stdio: ["pipe", "pipe", "pipe", "ipc"],
+      });
+    `;
+    const expected = [
+      {
+        method: "spawn",
+        environmentSupplied: true,
+        stdioMode: "pipe",
+        resolution: "complete",
+      },
+      {
+        method: "execFile",
+        environmentSupplied: true,
+        stdioMode: "default",
+        resolution: "complete",
+      },
+      {
+        method: "fork",
+        environmentSupplied: true,
+        stdioMode: "array",
+        resolution: "complete",
+      },
+    ];
+
+    expect(spawnFacts(optionsSource(""))).toEqual(expected);
+    expect(spawnFacts(optionsSource("[], "))).toEqual(expected);
+    expect(
+      spawnFacts(`
+        import { spawn, execFile, fork } from "node:child_process";
+        spawn("tool");
+        execFile("tool", ["--x"]);
+        fork("worker.js");
+      `),
+    ).toEqual(
+      expected.map((facts) => ({
+        ...facts,
+        environmentSupplied: false,
+        stdioMode: "default",
+      })),
+    );
+  });
+
+  it("keeps an unresolved kill signal distinct from default and literal signals", () => {
+    const ir = analyzeJavaScriptSemantics(`
+      import { spawn } from "node:child_process";
+      function run(signal) {
+        const child = spawn("/bin/tool");
+        child.kill(signal);
+        child.kill();
+        child.kill("SIGINT");
+      }
+    `);
+
+    expect(ir.childProcessSpawns).toHaveLength(1);
+    expect(
+      ir.childProcessInteractions.map(
+        ({ signalName, resolution, linkedProcessIds }) => ({
+          signalName,
+          resolution,
+          linkedCount: linkedProcessIds.length,
+        }),
+      ),
+    ).toEqual([
+      { signalName: null, resolution: "complete", linkedCount: 1 },
+      { signalName: "SIGTERM", resolution: "complete", linkedCount: 1 },
+      { signalName: "SIGINT", resolution: "complete", linkedCount: 1 },
+    ]);
+  });
+});
